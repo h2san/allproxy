@@ -11,11 +11,10 @@ import (
 	"sync"
 
 	"github.com/h2san/allproxy"
-	"golang.org/x/net/proxy"
 )
 
 func main() {
-	localListen, err := net.Listen("tcp", "0.0.0.0:8888")
+	localListen, err := net.Listen("tcp", "192.168.1.160:8888")
 
 	if err != nil {
 		fmt.Println(err)
@@ -23,6 +22,7 @@ func main() {
 	}
 	for {
 		conn, err := localListen.Accept()
+		//fmt.Println(conn.LocalAddr().String(), conn.RemoteAddr().String())
 		if err != nil {
 			fmt.Println(err)
 			continue
@@ -44,9 +44,9 @@ const (
 )
 
 const (
-	proxyNet  = "tcp"
-	proxyAddr = "127.0.0.1:8002"
-	//proxyAddr = "45.78.18.160:443"
+	proxyNet = "tcp"
+	//proxyAddr = "127.0.0.1:8002"
+	proxyAddr = "45.78.18.160:443"
 )
 
 func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
@@ -102,10 +102,13 @@ func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
 		return
 	}
 
-	scocks5, err := allproxy.ShadowSocks5Dial(cipher, proxyNet, proxyAddr, nil, proxy.Direct)
-	perHost := proxy.NewPerHost(proxy.Direct, scocks5)
+	scocks5, err := allproxy.ShadowSocks5Dial(cipher, proxyNet, proxyAddr, nil, allproxy.Direct)
+	perHost := allproxy.NewPerHost(scocks5, scocks5)
 	perHost.AddFromString("202.197.74.49")
 	perHost.AddFromString("*.google.com")
+	perHost.AddFromString("*.youku.com")
+	perHost.AddFromString("*.youtube.com")
+
 	remote, err := perHost.Dial("tcp", host)
 	if err != nil {
 		fmt.Println(err)
@@ -118,23 +121,13 @@ func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
 	wg.Add(1)
 	go func() {
 		defer wg.Add(-1)
-		_, err = io.Copy(conn, remote)
-		if err != nil {
-			if err != io.EOF {
-				fmt.Println(err)
-			}
-		}
-
+		allproxy.PipeThenClose(remote, conn)
 	}()
+
 	wg.Add(1)
 	go func() {
 		defer wg.Add(-1)
-		_, err = io.Copy(remote, conn)
-		if err != nil {
-			if err != io.EOF {
-				fmt.Println(err)
-			}
-		}
+		allproxy.PipeThenClose(conn, remote)
 	}()
 	wg.Wait()
 }
@@ -165,6 +158,7 @@ func getRequest(conn net.Conn) (host string, err error) {
 	if _, err = io.ReadFull(conn, buf[0:4]); err != nil {
 		return
 	}
+	fmt.Println(buf[0:4])
 	if int(buf[0]) != 0x05 {
 		err = errors.New("不支持的socks version")
 		return

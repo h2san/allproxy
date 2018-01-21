@@ -4,18 +4,16 @@ import (
 	"errors"
 	"net"
 	"strconv"
-
-	"golang.org/x/net/proxy"
 )
 
 type ShadowSocks5 struct {
 	user, password string
 	network, addr  string
 	mycipher       *Cipher
-	forward        proxy.Dialer
+	forward        Dialer
 }
 
-func ShadowSocks5Dial(cipher *Cipher, network, addr string, auth *proxy.Auth, forward proxy.Dialer) (proxy.Dialer, error) {
+func ShadowSocks5Dial(cipher *Cipher, network, addr string, auth *Auth, forward Dialer) (Dialer, error) {
 	s := &ShadowSocks5{
 		network:  network,
 		addr:     addr,
@@ -27,30 +25,6 @@ func ShadowSocks5Dial(cipher *Cipher, network, addr string, auth *proxy.Auth, fo
 		s.password = auth.Password
 	}
 	return s, nil
-}
-
-const socks5Version = 5
-const (
-	socks5AuthNone     = 0
-	socks5AuthPassword = 2
-)
-const socks5Connect = 1
-const (
-	socks5IP4    = 1
-	socks5Domain = 3
-	socks5IP6    = 4
-)
-
-var socks5Errors = []string{
-	"",
-	"general failure",
-	"connection forbidden",
-	"network unreachable",
-	"host unreachable",
-	"connection refused",
-	"TTL expired",
-	"command not supported",
-	"address type not supported",
 }
 
 // Dial connects to the address addr on the given network via the SOCKS5 proxy.

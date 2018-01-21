@@ -67,7 +67,6 @@ func handleConnection(c net.Conn, cipher *allproxy.Cipher) {
 		allproxy.PipeThenClose(conn, remote)
 	}()
 	wg.Wait()
-	fmt.Println("close connection")
 }
 
 func getRequest(conn net.Conn) (host string, err error) {
