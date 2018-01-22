@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/h2san/allproxy"
@@ -20,6 +23,7 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+
 	for {
 		conn, err := localListen.Accept()
 		//fmt.Println(conn.LocalAddr().String(), conn.RemoteAddr().String())
@@ -75,6 +79,98 @@ func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
 		fmt.Println(err)
 		return
 	}
+	if buf[0] != 0x05 {
+		//treat it as http or https
+		// 解析到 host
+		var httpRequestLine = make([]byte, 1024)
+		copy(httpRequestLine[:2], buf[:2])
+
+		fmt.Println(string(httpRequestLine[:2]))
+		var hasreadn = 2
+		for {
+			n, err := conn.Read(httpRequestLine[hasreadn:])
+			if err != nil {
+				return
+			}
+			fmt.Println(string(httpRequestLine[:n+hasreadn]))
+			i := bytes.IndexByte(httpRequestLine[:hasreadn+n], '\n')
+			hasreadn += n
+			if i != -1 {
+				rqline := httpRequestLine[:i+1]
+				fmt.Println(string(rqline))
+				muv := bytes.Split(rqline, []byte{' '})
+				var httpMethod, httpHost, address string
+				if len(muv) > 2 {
+					httpMethod = string(muv[0])
+					fmt.Println(httpMethod)
+					httpHost = string(muv[1])
+					fmt.Println(httpHost)
+				} else {
+					return
+				}
+				hostPortUrl, err := url.Parse(httpHost)
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+				if hostPortUrl.Opaque == "443" {
+					address = hostPortUrl.Scheme + ":443"
+				} else {
+					if strings.Index(hostPortUrl.Host, ":") == -1 {
+						address = hostPortUrl.Host + ":80"
+					} else {
+						address = hostPortUrl.Host
+					}
+				}
+				fmt.Println(address)
+
+				scocks5, err := allproxy.ShadowSocks5Dial(cipher, proxyNet, proxyAddr, nil, allproxy.Direct)
+				perHost := allproxy.NewPerHost(allproxy.Direct, scocks5)
+				//perHost.AddFromString("202.197.74.49")
+				perHost.AddFromString("*.google.com")
+				perHost.AddFromString("*.youku.com")
+				perHost.AddFromString("*.youtube.com")
+
+				remote, err := perHost.Dial("tcp", address)
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+				defer func() {
+					remote.Close()
+				}()
+
+				if httpMethod == "CONNECT" {
+					_, err := conn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
+
+					if err != nil {
+						fmt.Println(err)
+						return
+					}
+					//remote.Write(httpRequestLine[:hasreadn])
+				} else {
+					fmt.Println(string(httpRequestLine[:hasreadn]))
+					remote.Write(httpRequestLine[:hasreadn])
+				}
+				var wg sync.WaitGroup
+				wg.Add(1)
+				go func() {
+					defer wg.Add(-1)
+					allproxy.PipeThenClose(remote, conn)
+				}()
+
+				wg.Add(1)
+				go func() {
+					defer wg.Add(-1)
+					allproxy.PipeThenClose(conn, remote)
+				}()
+				wg.Wait()
+				break
+
+			}
+		}
+		return
+	}
 	nmethod := int(buf[1])
 	msgLen := nmethod + 2
 	_, err = io.ReadFull(conn, buf[2:msgLen])
@@ -104,7 +200,6 @@ func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
 
 	scocks5, err := allproxy.ShadowSocks5Dial(cipher, proxyNet, proxyAddr, nil, allproxy.Direct)
 	perHost := allproxy.NewPerHost(scocks5, scocks5)
-	perHost.AddFromString("202.197.74.49")
 	perHost.AddFromString("*.google.com")
 	perHost.AddFromString("*.youku.com")
 	perHost.AddFromString("*.youtube.com")
