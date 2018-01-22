@@ -5,5 +5,6 @@
 
 ### TaskList
 - [x] socks5
-- [ ] http
-- [ ] https
+- [x] http
+- [x] https
+- [ ] socks5 udp forward
