@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
-	"fmt"
+	"flag"
 	"io"
+	"io/ioutil"
+	"log"
 	"net"
 	"net/url"
 	"os"
@@ -17,24 +20,49 @@ import (
 )
 
 func main() {
-	localListen, err := net.Listen("tcp", "192.168.1.160:8888")
+	var config string
+	flag.StringVar(&config, "c", "allproxy.json", "allproxy.json path")
+	flag.Parse()
+
+	clientConfig := &allproxy.ClientConfig{}
+	if _, err := os.Stat(config); err != nil {
+		log.Fatalln(err)
+		os.Exit(1)
+	}
+	f, err := os.Open(config)
+	if err != nil {
+		log.Fatalln(err)
+		os.Exit(1)
+	}
+	jsonconf, err := ioutil.ReadAll(f)
+	if err != nil {
+		log.Fatalln(err)
+		os.Exit(1)
+	}
+	if err := json.Unmarshal(jsonconf, clientConfig); err != nil {
+		log.Fatal(err)
+		os.Exit(1)
+	}
+	log.Printf("%v\n", *clientConfig)
+	f.Close()
+	proxyAddr = clientConfig.Server + ":" + strconv.Itoa(clientConfig.ServerPort)
+	localListen, err := net.Listen("tcp", clientConfig.LocalAddress+":"+strconv.Itoa(clientConfig.LocalPort))
 
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		os.Exit(1)
 	}
 
 	for {
 		conn, err := localListen.Accept()
-		//fmt.Println(conn.LocalAddr().String(), conn.RemoteAddr().String())
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 			continue
 		}
-		method := "aes-256-cfb"
-		cipher, err := allproxy.NewCipher(method, "NzQwMTk5ZW")
+		method := clientConfig.Method
+		cipher, err := allproxy.NewCipher(method, clientConfig.PassWord)
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 			continue
 		}
 		go handleConn(conn, cipher)
@@ -47,10 +75,9 @@ const (
 	Socks5   = 1
 )
 
-const (
-	proxyNet = "tcp"
-	//proxyAddr = "127.0.0.1:8002"
-	proxyAddr = "45.78.18.160:443"
+var (
+	proxyNet  = "tcp"
+	proxyAddr = ""
 )
 
 func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
@@ -76,7 +103,7 @@ func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
 	buf := make([]byte, 257)
 	var err error
 	if _, err = io.ReadFull(conn, buf[:2]); err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 	if buf[0] != 0x05 {
@@ -85,32 +112,32 @@ func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
 		var httpRequestLine = make([]byte, 1024)
 		copy(httpRequestLine[:2], buf[:2])
 
-		fmt.Println(string(httpRequestLine[:2]))
+		//log.Println(string(httpRequestLine[:2]))
 		var hasreadn = 2
 		for {
 			n, err := conn.Read(httpRequestLine[hasreadn:])
 			if err != nil {
 				return
 			}
-			fmt.Println(string(httpRequestLine[:n+hasreadn]))
+			//log.Println(string(httpRequestLine[:n+hasreadn]))
 			i := bytes.IndexByte(httpRequestLine[:hasreadn+n], '\n')
 			hasreadn += n
 			if i != -1 {
 				rqline := httpRequestLine[:i+1]
-				fmt.Println(string(rqline))
+				//log.Println(string(rqline))
 				muv := bytes.Split(rqline, []byte{' '})
 				var httpMethod, httpHost, address string
 				if len(muv) > 2 {
 					httpMethod = string(muv[0])
-					fmt.Println(httpMethod)
+					//log.Println(httpMethod)
 					httpHost = string(muv[1])
-					fmt.Println(httpHost)
+					//log.Println(httpHost)
 				} else {
 					return
 				}
 				hostPortUrl, err := url.Parse(httpHost)
 				if err != nil {
-					fmt.Println(err)
+					log.Println(err)
 					return
 				}
 				if hostPortUrl.Opaque == "443" {
@@ -122,18 +149,15 @@ func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
 						address = hostPortUrl.Host
 					}
 				}
-				fmt.Println(address)
+				//log.Println(address)
 
 				scocks5, err := allproxy.ShadowSocks5Dial(cipher, proxyNet, proxyAddr, nil, allproxy.Direct)
-				perHost := allproxy.NewPerHost(allproxy.Direct, scocks5)
+				perHost := allproxy.NewPerHost(scocks5, scocks5)
 				//perHost.AddFromString("202.197.74.49")
-				perHost.AddFromString("*.google.com")
-				perHost.AddFromString("*.youku.com")
-				perHost.AddFromString("*.youtube.com")
 
 				remote, err := perHost.Dial("tcp", address)
 				if err != nil {
-					fmt.Println(err)
+					log.Println(err)
 					return
 				}
 				defer func() {
@@ -144,12 +168,12 @@ func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
 					_, err := conn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
 
 					if err != nil {
-						fmt.Println(err)
+						log.Println(err)
 						return
 					}
 					//remote.Write(httpRequestLine[:hasreadn])
 				} else {
-					fmt.Println(string(httpRequestLine[:hasreadn]))
+					//log.Println(string(httpRequestLine[:hasreadn]))
 					remote.Write(httpRequestLine[:hasreadn])
 				}
 				var wg sync.WaitGroup
@@ -175,7 +199,7 @@ func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
 	msgLen := nmethod + 2
 	_, err = io.ReadFull(conn, buf[2:msgLen])
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 	/*
@@ -189,12 +213,12 @@ func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
 	_, err = conn.Write([]byte{0x05, 0})
 	host, err := getRequest(conn)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 	_, err = askRequest(conn)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 
@@ -206,7 +230,7 @@ func handleConn(conn net.Conn, cipher *allproxy.Cipher) {
 
 	remote, err := perHost.Dial("tcp", host)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 	defer func() {
@@ -253,7 +277,7 @@ func getRequest(conn net.Conn) (host string, err error) {
 	if _, err = io.ReadFull(conn, buf[0:4]); err != nil {
 		return
 	}
-	fmt.Println(buf[0:4])
+	//log.Println(buf[0:4])
 	if int(buf[0]) != 0x05 {
 		err = errors.New("不支持的socks version")
 		return

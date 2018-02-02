@@ -1,0 +1,10 @@
+{
+    "server":"127.0.0.1",
+    "server_port":443,
+    "local_address":"127.0.0.1",
+    "local_port":1081,
+    "password":"test",
+    "timeout":300,
+    "method":"aes-256-cfb",
+    "noproxy":["127.0.0.1","localhost"]   
+}
