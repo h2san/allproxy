@@ -28,7 +28,7 @@ func main() {
 			continue
 		}
 		method := "aes-256-cfb"
-		cipher, _ := allproxy.NewCipher(method, "NzQwMTk5ZW")
+		cipher, _ := allproxy.NewCipher(method, "h2san")
 		go handleConnection(conn, cipher)
 	}
 }
